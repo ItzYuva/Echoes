@@ -77,13 +77,11 @@ class GeminiSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="GOOGLE_")
 
     api_key: str = ""
-    classification_model: str = "gemini-2.0-flash"
+    classification_model: str = "gemini-2.5-flash"
     fallback_model: str = "gemini-2.0-flash-lite"
     max_concurrency: int = 10  # semaphore limit for async calls
     request_timeout: int = 30  # seconds
     max_retries: int = 3
-
-
 
 
 
@@ -97,6 +95,23 @@ class QdrantSettings(BaseSettings):
     grpc_port: int = 6334
     collection_name: str = "echoes_stories"
     distance_metric: str = "Cosine"
+
+
+class PostgresSettings(BaseSettings):
+    """PostgreSQL configuration for Phase 2 user profiles."""
+
+    model_config = SettingsConfigDict(env_prefix="POSTGRES_")
+
+    host: str = "localhost"
+    port: int = 5432
+    db: str = "echoes"
+    user: str = "echoes"
+    password: str = "echoes_dev"
+
+    @property
+    def dsn(self) -> str:
+        """Build the PostgreSQL connection string."""
+        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
 
 class PipelineSettings(BaseSettings):
@@ -133,6 +148,7 @@ class Settings(BaseSettings):
     reddit: RedditSettings = Field(default_factory=RedditSettings)
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
     qdrant: QdrantSettings = Field(default_factory=QdrantSettings)
+    postgres: PostgresSettings = Field(default_factory=PostgresSettings)
     pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
 
 
@@ -154,5 +170,6 @@ def get_settings() -> Settings:
         reddit=RedditSettings(),
         gemini=GeminiSettings(),
         qdrant=QdrantSettings(),
+        postgres=PostgresSettings(),
         pipeline=PipelineSettings(),
     )

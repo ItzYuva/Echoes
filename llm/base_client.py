@@ -1,8 +1,8 @@
 """
-Echoes Data Pipeline — Abstract LLM Client
+Echoes Data Pipeline -- Abstract LLM Client
 
 Defines the interface that all LLM implementations must follow.
-Pipeline code calls these methods — never the SDK directly.
+Pipeline code calls these methods -- never the SDK directly.
 This is the ONE abstraction worth having in v1: it lets us
 swap Gemini for Claude/GPT/local models without touching pipeline logic.
 """
@@ -10,7 +10,7 @@ swap Gemini for Claude/GPT/local models without touching pipeline logic.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Dict, List, Optional
 
 from storage.models import ClassificationResult, StoryMetadata
 
@@ -22,6 +22,8 @@ class BaseLLMClient(ABC):
     Implementations handle the API-specific details (auth, formatting,
     rate limiting, retries).
     """
+
+    # -- Phase 1: Classification & Metadata -----------------------------------
 
     @abstractmethod
     async def classify(self, text: str) -> tuple[ClassificationResult, str]:
@@ -76,5 +78,24 @@ class BaseLLMClient(ABC):
 
         Returns:
             List of StoryMetadata (or None for failures), same order as input.
+        """
+        ...
+
+    # -- Phase 2: Intake Conversation -----------------------------------------
+
+    @abstractmethod
+    async def intake_turn(
+        self,
+        system_prompt: str,
+        conversation_history: List[Dict[str, str]],
+    ) -> str:
+        """Send a single turn of the intake conversation.
+
+        Args:
+            system_prompt: The system prompt defining the intake persona.
+            conversation_history: List of {"role": ..., "content": ...} dicts.
+
+        Returns:
+            The LLM's next message (question or closing + values vector).
         """
         ...

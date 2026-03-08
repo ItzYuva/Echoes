@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Optional
+from typing import Dict, List, Optional
 
 import google.generativeai as genai
 from tenacity import (
@@ -118,8 +118,6 @@ class GeminiClient(BaseLLMClient):
             The raw text response from the model.
         """
         async with self._semaphore:
-            # google-generativeai uses synchronous calls under the hood,
-            # so we run in an executor to avoid blocking the event loop
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None,
@@ -127,7 +125,6 @@ class GeminiClient(BaseLLMClient):
                     prompt,
                     generation_config=genai.GenerationConfig(
                         temperature=0.0,
-                        max_output_tokens=256,
                     ),
                 ),
             )
@@ -271,3 +268,76 @@ class GeminiClient(BaseLLMClient):
             key_themes=data.get("key_themes", [])[:5],
             hindsight_insight=data.get("hindsight_insight", ""),
         )
+
+    # -- Phase 2: Intake Conversation -----------------------------------------
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        reraise=True,
+    )
+    async def intake_turn(
+        self,
+        system_prompt: str,
+        conversation_history: List[Dict[str, str]],
+    ) -> str:
+        """Send a single turn of the intake conversation.
+
+        Converts our role-based history to Gemini's content format
+        and returns the model's next response.
+
+        Args:
+            system_prompt: The system prompt defining the intake persona.
+            conversation_history: List of {"role": ..., "content": ...} dicts.
+
+        Returns:
+            The LLM's next message text.
+        """
+        async with self._semaphore:
+            # Build a dedicated model with the system instruction baked in
+            intake_model = genai.GenerativeModel(
+                model_name=self.settings.classification_model,
+                system_instruction=system_prompt,
+            )
+
+            # Convert conversation history to Gemini content format
+            gemini_history = []
+            for msg in conversation_history:
+                role = "model" if msg["role"] == "assistant" else "user"
+                gemini_history.append({"role": role, "parts": [msg["content"]]})
+
+            loop = asyncio.get_event_loop()
+
+            if gemini_history:
+                # Multi-turn: start a chat with history and send empty-ish prompt
+                # The last message in history should be from the user
+                chat_history = gemini_history[:-1] if gemini_history else []
+                last_message = gemini_history[-1]["parts"][0] if gemini_history else ""
+
+                def _chat_turn():
+                    chat = intake_model.start_chat(history=chat_history)
+                    response = chat.send_message(
+                        last_message,
+                        generation_config=genai.GenerationConfig(
+                            temperature=0.7,
+                        ),
+                    )
+                    return response.text.strip()
+
+                result = await loop.run_in_executor(None, _chat_turn)
+            else:
+                # First turn: no history yet, just ask the model to begin
+                def _first_turn():
+                    response = intake_model.generate_content(
+                        "Begin the intake conversation with a warm greeting and your first question.",
+                        generation_config=genai.GenerationConfig(
+                            temperature=0.7,
+                        ),
+                    )
+                    return response.text.strip()
+
+                result = await loop.run_in_executor(None, _first_turn)
+
+            logger.debug("Intake turn response: %s...", result[:100])
+            return result
