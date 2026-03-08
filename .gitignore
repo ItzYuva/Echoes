@@ -1,0 +1,38 @@
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Data (local only — labeled_samples is committed as reference data)
+data/staging.db
+data/staging.db-journal
+data/*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Qdrant local data
+qdrant_storage/
+
+# Pytest cache
+.pytest_cache/
+
+# Logs
+logs/
+*.log
