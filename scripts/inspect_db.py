@@ -117,7 +117,7 @@ def show_qdrant(settings) -> None:
     """Show Qdrant collection info."""
     try:
         from storage.qdrant_store import QdrantStore
-        qdrant = QdrantStore(settings.qdrant, 768)  # Gemini text-embedding-004 dimensions
+        qdrant = QdrantStore(settings.qdrant, 3072)  # gemini-embedding-001 dimensions
         info = qdrant.get_collection_info()
         console.print(Panel(
             json.dumps(info, indent=2),

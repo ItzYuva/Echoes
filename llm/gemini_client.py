@@ -341,3 +341,135 @@ class GeminiClient(BaseLLMClient):
 
             logger.debug("Intake turn response: %s...", result[:100])
             return result
+
+    # -- Phase 3: RAG Core ---------------------------------------------------
+
+    QUERY_ANALYSIS_PROMPT = """Analyze this decision description and extract structured information. Respond in JSON only, no other text.
+
+{{
+  "decision_type": one of ["career", "relationship", "relocation", "education", "health", "financial", "family", "lifestyle", "other"],
+  "decision_subcategory": specific label (e.g., "leaving stable job for freelance"),
+  "core_tension": one sentence describing the fundamental tradeoff,
+  "emotional_state": array of 2-4 emotions the person seems to be feeling,
+  "stakes": one of ["low", "moderate", "high", "life-altering"],
+  "key_factors": array of 3-5 specific factors mentioned,
+  "what_would_help": one sentence describing what kind of retrospective stories would be most valuable
+}}
+
+Decision description:
+\"\"\"
+{user_text}
+\"\"\"
+"""
+
+    SYNTHETIC_STORY_PROMPT = """Generate a realistic retrospective reflection written by a real person looking back on a major life decision. The story should read like a Reddit post or personal essay — not polished, not motivational, just honest.
+
+Requirements:
+- Decision type: {decision_type}
+- Specific scenario: {scenario}
+- Time elapsed since decision: {time_elapsed}
+- Outcome: {outcome_tone} (but nuanced — even positive outcomes should have costs, and negative outcomes should have silver linings)
+- Length: 200-500 words
+- Written in first person
+- Include: the fear/excitement at the time, specific details that make it feel real, what actually happened, what they know now that they didn't then
+- Do NOT include: motivational quotes, generic advice, bullet points, section headers
+- Tone: honest, specific, slightly vulnerable — like telling a close friend over coffee
+
+Write ONLY the story text, no preamble or metadata.
+"""
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        reraise=True,
+    )
+    async def analyze_query(self, user_text: str) -> dict:
+        """Analyze a decision query and return structured JSON."""
+        prompt = self.QUERY_ANALYSIS_PROMPT.format(user_text=user_text)
+        raw = await self._call_gemini(prompt)
+
+        # Defensive JSON parsing
+        try:
+            # Strip markdown fences
+            cleaned = raw
+            if "```" in cleaned:
+                lines = cleaned.split("\n")
+                lines = [l for l in lines if not l.strip().startswith("```")]
+                cleaned = "\n".join(lines)
+
+            # Fix trailing commas
+            import re
+            cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            # Try to extract JSON from response
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if match:
+                try:
+                    extracted = re.sub(r",\s*([}\]])", r"\1", match.group())
+                    return json.loads(extracted)
+                except json.JSONDecodeError:
+                    pass
+            logger.warning("Could not parse query analysis: %s", raw[:200])
+            return {"decision_type": "other", "what_would_help": ""}
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        reraise=True,
+    )
+    async def present_stories(self, prompt: str, stream: bool = False) -> str:
+        """Present stories using the presentation prompt.
+
+        Uses higher temperature for more natural, varied writing.
+        """
+        async with self._semaphore:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.model.generate_content(
+                    prompt,
+                    generation_config=genai.GenerationConfig(
+                        temperature=0.7,
+                        max_output_tokens=4096,
+                    ),
+                ),
+            )
+            return response.text.strip()
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        reraise=True,
+    )
+    async def generate_synthetic_story(
+        self,
+        decision_type: str,
+        scenario: str,
+        time_elapsed: str,
+        outcome_tone: str,
+    ) -> str:
+        """Generate a realistic retrospective story for seeding."""
+        prompt = self.SYNTHETIC_STORY_PROMPT.format(
+            decision_type=decision_type,
+            scenario=scenario,
+            time_elapsed=time_elapsed,
+            outcome_tone=outcome_tone,
+        )
+        async with self._semaphore:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.model.generate_content(
+                    prompt,
+                    generation_config=genai.GenerationConfig(
+                        temperature=0.9,  # High creativity for varied stories
+                        max_output_tokens=1024,
+                    ),
+                ),
+            )
+            return response.text.strip()

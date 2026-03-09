@@ -2,7 +2,7 @@
 Echoes Data Pipeline — Embedding Generator (Component 4)
 
 Generates vector embeddings for story chunks using Google's
-text-embedding-004 model via the Gemini API. Handles batching
+gemini-embedding-001 model via the Gemini API. Handles batching
 for efficiency and retry logic for API reliability.
 
 Uses the same GOOGLE_API_KEY as the classifier — no extra API key needed.
@@ -48,9 +48,9 @@ class EmbeddingGenerator:
     ) -> None:
         self.settings = settings
         genai.configure(api_key=settings.api_key)
-        self.model = "models/text-embedding-004"
+        self.model = "models/gemini-embedding-001"
         self.batch_size = batch_size
-        self.dimensions = 768  # text-embedding-004 output dimensions
+        self.dimensions = 3072  # gemini-embedding-001 output dimensions
 
     @retry(
         retry=retry_if_exception_type((Exception,)),

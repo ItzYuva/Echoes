@@ -99,3 +99,51 @@ class BaseLLMClient(ABC):
             The LLM's next message (question or closing + values vector).
         """
         ...
+
+    # -- Phase 3: RAG Core ---------------------------------------------------
+
+    @abstractmethod
+    async def analyze_query(self, user_text: str) -> dict:
+        """Analyze a decision query and return structured information.
+
+        Args:
+            user_text: The user's decision description.
+
+        Returns:
+            Dict with decision_type, core_tension, emotional_state, etc.
+        """
+        ...
+
+    @abstractmethod
+    async def present_stories(self, prompt: str, stream: bool = False) -> str:
+        """Present stories using the presentation prompt.
+
+        Args:
+            prompt: The full presentation prompt with stories.
+            stream: Whether to stream the response.
+
+        Returns:
+            The formatted presentation text.
+        """
+        ...
+
+    @abstractmethod
+    async def generate_synthetic_story(
+        self,
+        decision_type: str,
+        scenario: str,
+        time_elapsed: str,
+        outcome_tone: str,
+    ) -> str:
+        """Generate a realistic retrospective story for test data seeding.
+
+        Args:
+            decision_type: Type of decision (career, relationship, etc.).
+            scenario: Specific scenario description.
+            time_elapsed: How long since the decision.
+            outcome_tone: positive / negative / mixed.
+
+        Returns:
+            The generated story text.
+        """
+        ...

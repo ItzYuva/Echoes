@@ -37,3 +37,6 @@ qdrant_storage/
 # Logs
 logs/
 *.log
+
+.claude/
+.env.example/

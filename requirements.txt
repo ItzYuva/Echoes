@@ -44,3 +44,9 @@ psycopg2-binary>=2.9.9
 
 # Math (cosine similarity)
 numpy>=1.26.0
+
+# --- Phase 3: RAG Core ---
+# (Uses existing deps: qdrant-client, google-generativeai, asyncpg, numpy, pydantic)
+
+# Streaming HTTP for LLM responses
+httpx>=0.27.0

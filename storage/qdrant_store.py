@@ -33,13 +33,13 @@ class QdrantStore:
 
     Args:
         settings: Qdrant connection settings.
-        vector_size: Dimension of the embedding vectors (768 for Gemini text-embedding-004).
+        vector_size: Dimension of the embedding vectors (3072 for gemini-embedding-001).
     """
 
     def __init__(
         self,
         settings: QdrantSettings,
-        vector_size: int = 1536,
+        vector_size: int = 3072,
     ) -> None:
         self.settings = settings
         self.vector_size = vector_size
@@ -187,11 +187,12 @@ class QdrantStore:
         Returns:
             List of result dicts with id, score, and payload.
         """
-        results = self.client.search(
+        response = self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             limit=limit,
             query_filter=filters,
+            with_payload=True,
         )
         return [
             {
@@ -199,7 +200,7 @@ class QdrantStore:
                 "score": r.score,
                 "payload": r.payload,
             }
-            for r in results
+            for r in response.points
         ]
 
     def count_points(self) -> int:

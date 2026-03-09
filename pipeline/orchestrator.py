@@ -83,7 +83,7 @@ class PipelineOrchestrator:
         if self._qdrant is None:
             self._qdrant = QdrantStore(
                 self.settings.qdrant,
-                vector_size=768,  # Gemini text-embedding-004 dimensions
+                vector_size=3072,  # gemini-embedding-001 dimensions
             )
             self._qdrant.ensure_collection()
         return self._qdrant
