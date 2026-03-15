@@ -473,3 +473,65 @@ Write ONLY the story text, no preamble or metadata.
                 ),
             )
             return response.text.strip()
+
+    # -- Phase 4: Agent Tools ---------------------------------------------------
+
+    SEARCH_QUERY_PROMPT = """Generate 3-4 search queries optimized for finding retrospective stories on Reddit and the web.
+
+The user is facing this decision:
+"{decision_text}"
+
+Decision analysis:
+- Type: {decision_type}
+- Core tension: {core_tension}
+- Key factors: {key_factors}
+
+Generate search queries that would find people who have ALREADY made a similar decision and are looking BACK on it. Use past tense and retrospective language.
+
+Respond with a JSON array of query strings only, no other text. Example:
+["left tenured position looking back years later", "quit academia regret hindsight", "career change professor update how it turned out"]"""
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        reraise=True,
+    )
+    async def build_search_queries(
+        self,
+        decision_text: str,
+        query_analysis: dict,
+    ) -> list[str]:
+        """Generate optimized search queries for finding retrospective stories."""
+        prompt = self.SEARCH_QUERY_PROMPT.format(
+            decision_text=decision_text,
+            decision_type=query_analysis.get("decision_type", "other"),
+            core_tension=query_analysis.get("core_tension", ""),
+            key_factors=", ".join(query_analysis.get("key_factors", [])),
+        )
+
+        raw = await self._call_gemini(prompt)
+
+        # Parse JSON array from response
+        try:
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+                cleaned = re.sub(r"\s*```$", "", cleaned)
+
+            queries = json.loads(cleaned)
+            if isinstance(queries, list) and all(isinstance(q, str) for q in queries):
+                return queries[:5]
+        except (json.JSONDecodeError, TypeError):
+            # Try to extract array from response
+            match = re.search(r"\[.*\]", raw, re.DOTALL)
+            if match:
+                try:
+                    queries = json.loads(match.group())
+                    if isinstance(queries, list):
+                        return [str(q) for q in queries[:5]]
+                except json.JSONDecodeError:
+                    pass
+
+        logger.warning("Could not parse search queries: %s", raw[:200])
+        return []

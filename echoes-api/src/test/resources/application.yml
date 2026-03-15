@@ -1,0 +1,20 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database-platform: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: false
+
+echoes:
+  python-api:
+    base-url: http://localhost:8000
+    timeout-seconds: 10
+  auth:
+    token-secret: test-secret-key-for-unit-tests-only-do-not-use-in-production
+    token-expiry-hours: 1

@@ -1,12 +1,17 @@
 """
-Echoes Phase 3 -- RAG Pipeline Orchestrator
+Echoes Phase 3+4 -- RAG Pipeline Orchestrator
 
-The full RAG flow: query → understand → retrieve → rerank → confidence → present → log.
-This is the main entry point that Phase 5's frontend will call.
+The full RAG flow: query → understand → retrieve → rerank → confidence →
+[agent search if needed] → present → log.
+
+Phase 4 integration: When confidence is low/insufficient, the agent
+orchestrator searches for live stories and merges them into the results.
+When confidence is medium, background enrichment runs silently.
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from typing import Optional
@@ -46,6 +51,9 @@ class EchoesResponse:
         retrieval_latency_ms: int = 0,
         reranking_latency_ms: int = 0,
         presentation_latency_ms: int = 0,
+        live_search_used: bool = False,
+        live_stories_count: int = 0,
+        agent_searching: bool = False,
     ):
         self.presentation = presentation
         self.confidence = confidence
@@ -56,19 +64,24 @@ class EchoesResponse:
         self.retrieval_latency_ms = retrieval_latency_ms
         self.reranking_latency_ms = reranking_latency_ms
         self.presentation_latency_ms = presentation_latency_ms
+        self.live_search_used = live_search_used
+        self.live_stories_count = live_stories_count
+        self.agent_searching = agent_searching
 
 
 class RAGPipeline:
     """Orchestrates the full Echoes RAG flow.
 
     Connects query understanding → retrieval → re-ranking →
-    confidence check → presentation → logging.
+    confidence check → [Phase 4 agent] → presentation → logging.
 
     Args:
         settings: Application settings.
         llm_client: Gemini client for query analysis and presentation.
         qdrant: Qdrant store for story retrieval.
         embedder: Embedding generator for query embedding.
+        query_log_store: Optional PostgreSQL query log store.
+        agent_orchestrator: Optional Phase 4 agent for live search.
     """
 
     def __init__(
@@ -78,8 +91,12 @@ class RAGPipeline:
         qdrant: QdrantStore,
         embedder: EmbeddingGenerator,
         query_log_store: Optional[QueryLogStore] = None,
+        agent_orchestrator=None,
     ) -> None:
         self.settings = settings
+        self.llm_client = llm_client
+        self.qdrant = qdrant
+        self.embedder = embedder
         self.analyzer = QueryAnalyzer(llm_client)
         self.query_embedder = QueryEmbedder(embedder)
         self.retriever = HybridRetriever(qdrant)
@@ -87,6 +104,7 @@ class RAGPipeline:
         self.confidence_scorer = ConfidenceScorer()
         self.presenter = StoryPresenter(llm_client)
         self.query_log_store = query_log_store
+        self.agent = agent_orchestrator
 
     async def query(
         self,
@@ -95,7 +113,7 @@ class RAGPipeline:
         user_id: Optional[str] = None,
         max_stories: int = 10,
     ) -> EchoesResponse:
-        """Execute the full RAG pipeline.
+        """Execute the full RAG pipeline with Phase 4 integration.
 
         This is the main entry point. Everything Phase 5 needs to call.
 
@@ -163,6 +181,74 @@ class RAGPipeline:
         logger.info("Step 6: Assessing retrieval confidence...")
         confidence = self.confidence_scorer.score(ranking.stories, query_analysis)
 
+        # ── Step 6b: Phase 4 — Agent search if needed ───────────────────
+        live_search_used = False
+        live_stories_count = 0
+        agent_metadata = None
+
+        if self.agent and self._agent_enabled():
+            if confidence.level in ("low", "insufficient"):
+                # BLOCKING: Wait for agent results before presenting
+                logger.info(
+                    "Step 6b: Confidence is %s (%.2f) — activating agent...",
+                    confidence.level, confidence.score,
+                )
+
+                agent_result = await self.agent.search_for_stories(
+                    decision_text=user_text,
+                    query_analysis=query_analysis.model_dump(),
+                    confidence=confidence,
+                )
+                agent_metadata = agent_result
+
+                if agent_result.stories:
+                    # Convert live stories to candidates and merge
+                    from agent.integration.pipeline_hook import (
+                        live_stories_to_candidates,
+                        merge_candidates,
+                    )
+
+                    live_candidates = live_stories_to_candidates(agent_result.stories)
+                    merged = merge_candidates(
+                        retrieval_result.candidates, live_candidates
+                    )
+
+                    # Re-rank the combined set
+                    ranking = self.reranker.rerank(
+                        candidates=merged,
+                        query_analysis=query_analysis,
+                        values_vector=values_vector,
+                        max_stories=max_stories,
+                    )
+
+                    # Recompute confidence with merged results
+                    confidence = self.confidence_scorer.score(
+                        ranking.stories, query_analysis
+                    )
+                    agent_result.confidence_after = confidence.score
+
+                    live_search_used = True
+                    live_stories_count = len(agent_result.stories)
+
+                    logger.info(
+                        "Agent added %d stories, confidence: %.2f → %.2f",
+                        live_stories_count,
+                        agent_result.confidence_before,
+                        confidence.score,
+                    )
+
+            elif confidence.level == "medium":
+                # NON-BLOCKING: Present immediately, search in background
+                if self._background_enrichment_enabled():
+                    logger.info(
+                        "Step 6b: Confidence is medium — starting background enrichment"
+                    )
+                    asyncio.create_task(
+                        self._background_enrichment(
+                            user_text, query_analysis.model_dump()
+                        )
+                    )
+
         # ── Step 7: Present ─────────────────────────────────────────────
         logger.info("Step 7: Presenting stories (confidence=%s)...", confidence.level)
         presentation = await self.presenter.present(
@@ -175,12 +261,13 @@ class RAGPipeline:
         total_latency = int((time.time() - pipeline_start) * 1000)
 
         logger.info(
-            "RAG complete in %dms (embed=%d, retrieve=%d, rerank=%d, present=%d)",
+            "RAG complete in %dms (embed=%d, retrieve=%d, rerank=%d, present=%d, live=%s)",
             total_latency,
             embedding_latency,
             retrieval_latency,
             reranking_latency,
             presentation_latency,
+            live_search_used,
         )
 
         # ── Step 8: Log query to PostgreSQL ──────────────────────────────
@@ -208,7 +295,39 @@ class RAGPipeline:
             retrieval_latency_ms=retrieval_latency,
             reranking_latency_ms=reranking_latency,
             presentation_latency_ms=presentation_latency,
+            live_search_used=live_search_used,
+            live_stories_count=live_stories_count,
         )
+
+    def _agent_enabled(self) -> bool:
+        """Check if the Phase 4 agent is enabled."""
+        import os
+        return os.environ.get("AGENT_ENABLED", "true").lower() != "false"
+
+    def _background_enrichment_enabled(self) -> bool:
+        """Check if background enrichment is enabled."""
+        import os
+        return os.environ.get("AGENT_BACKGROUND_ENRICHMENT_ENABLED", "true").lower() != "false"
+
+    async def _background_enrichment(
+        self,
+        decision_text: str,
+        query_analysis: dict,
+    ) -> None:
+        """Run background enrichment asynchronously."""
+        try:
+            from agent.integration.background_enrichment import background_enrichment
+
+            added = await background_enrichment(
+                agent=self.agent,
+                decision_text=decision_text,
+                query_analysis=query_analysis,
+                embedder=self.embedder,
+                qdrant_store=self.qdrant,
+            )
+            logger.info("Background enrichment completed: %d stories added", added)
+        except Exception as e:
+            logger.error("Background enrichment failed: %s", e)
 
     async def _log_query(
         self,

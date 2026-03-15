@@ -147,3 +147,25 @@ class BaseLLMClient(ABC):
             The generated story text.
         """
         ...
+
+    # -- Phase 4: Agent Tools ---------------------------------------------------
+
+    @abstractmethod
+    async def build_search_queries(
+        self,
+        decision_text: str,
+        query_analysis: dict,
+    ) -> list[str]:
+        """Generate optimized search queries for finding retrospective stories.
+
+        Produces 3-5 query strings targeting retrospective content on
+        Reddit and the web.
+
+        Args:
+            decision_text: The user's decision description.
+            query_analysis: Structured analysis from Phase 3.
+
+        Returns:
+            List of search query strings.
+        """
+        ...

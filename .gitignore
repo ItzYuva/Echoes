@@ -3,7 +3,6 @@
 .venv/
 venv/
 env/
-.env.example
 
 # Python
 __pycache__/
@@ -39,4 +38,14 @@ logs/
 *.log
 
 .claude/
-.env.example/
+
+# Java / Maven
+echoes-api/target/
+*.jar
+*.class
+
+# Angular / Node
+echoes-frontend/node_modules/
+echoes-frontend/dist/
+echoes-frontend/.angular/
+node_modules/

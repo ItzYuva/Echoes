@@ -1,0 +1,32 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/echoes?options=-c%20TimeZone%3DAsia/Kolkata
+    username: echoes
+    password: echoes_dev
+    hikari:
+      maximum-pool-size: 10
+      connection-init-sql: SET TIME ZONE 'Asia/Kolkata'
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: Asia/Kolkata
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+echoes:
+  python-api:
+    base-url: http://localhost:8000
+    timeout-seconds: 60
+  auth:
+    token-secret: ${AUTH_TOKEN_SECRET:echoes-dev-secret-change-in-production-please}
+    token-expiry-hours: 720

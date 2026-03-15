@@ -50,3 +50,11 @@ numpy>=1.26.0
 
 # Streaming HTTP for LLM responses
 httpx>=0.27.0
+
+# --- Phase 4: MCP Agentic Layer ---
+
+# HTML parsing for web archive content extraction
+beautifulsoup4>=4.12.0
+
+# MCP Python SDK (for future MCP server upgrade path)
+mcp>=1.0.0

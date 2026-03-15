@@ -136,6 +136,17 @@ class PipelineSettings(BaseSettings):
     staging_db_path: str = str(STAGING_DB_PATH)
 
 
+class AgentSettings(BaseSettings):
+    """Phase 4 agent configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="AGENT_")
+
+    enabled: bool = True
+    max_tool_calls: int = 3
+    search_timeout_seconds: int = 30
+    background_enrichment_enabled: bool = True
+
+
 class Settings(BaseSettings):
     """Root settings object aggregating all sub-configs."""
 
@@ -150,6 +161,7 @@ class Settings(BaseSettings):
     qdrant: QdrantSettings = Field(default_factory=QdrantSettings)
     postgres: PostgresSettings = Field(default_factory=PostgresSettings)
     pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
+    agent: AgentSettings = Field(default_factory=AgentSettings)
 
 
 def get_settings() -> Settings:
@@ -172,4 +184,5 @@ def get_settings() -> Settings:
         qdrant=QdrantSettings(),
         postgres=PostgresSettings(),
         pipeline=PipelineSettings(),
+        agent=AgentSettings(),
     )
